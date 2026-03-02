@@ -1,0 +1,5 @@
+{
+  "name": "Job Pricer",
+  "description": "A tool to calculate the true price per part based on overhead costs, labor capacity, and profit margin.",
+  "requestFramePermissions": []
+}
