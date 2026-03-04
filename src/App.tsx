@@ -1,707 +1,815 @@
-import { useState, useMemo, useEffect } from "react";
-import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { motion } from "motion/react";
-import { Building2, Users, Briefcase, Package, AlertCircle, Wrench, Clock, DollarSign, PieChart, Plus, Image as ImageIcon, Search, ChevronRight, LayoutDashboard, Settings as SettingsIcon, Trash2, SlidersHorizontal, X } from "lucide-react";
-import { collection, doc, getDocs, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from "firebase/firestore";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import {
+  BrowserRouter, Routes, Route, Link,
+  useLocation, useNavigate, useParams
+} from "react-router-dom";
+import {
+  Building2, Users, Briefcase, Package, Wrench, Clock, DollarSign,
+  PieChart, Plus, Image as ImageIcon, Search, LayoutDashboard,
+  Settings as SettingsIcon, Trash2, SlidersHorizontal, X, Copy,
+  ArrowLeft, User, Calendar, Tag, AlertTriangle, CheckCircle,
+  Circle, PlayCircle, XCircle, Timer
+} from "lucide-react";
+import {
+  collection, doc, getDoc, setDoc, addDoc, updateDoc,
+  deleteDoc, onSnapshot, query, orderBy
+} from "firebase/firestore";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import { db, storage } from "./firebase";
 
-const formatCurrency = (val: number) =>
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const fmt = (val: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(val || 0);
+const n = (val: string | number) => Math.max(0, Number(val) || 0);
 
-const p = (val: string | number) => Math.max(0, Number(val) || 0);
+const DEFAULT_SETTINGS = {
+  wages: 18000, rent: 3500, electric: 600, insurance: 800,
+  equipment: 400, supplies: 300, phone: 150, other: 500,
+  hoursPerDay: 8, daysPerMonth: 22, workers: 3,
+};
 
-// --- UI Components ---
+const STATUSES = [
+  { value: "quoted",      label: "Quoted",       bg: "bg-blue-100",    text: "text-blue-700",    Icon: Circle },
+  { value: "won",         label: "Won",           bg: "bg-emerald-100", text: "text-emerald-700", Icon: CheckCircle },
+  { value: "in_progress", label: "In Progress",   bg: "bg-amber-100",   text: "text-amber-700",   Icon: PlayCircle },
+  { value: "completed",   label: "Completed",     bg: "bg-zinc-100",    text: "text-zinc-600",    Icon: CheckCircle },
+  { value: "lost",        label: "Lost",          bg: "bg-red-100",     text: "text-red-600",     Icon: XCircle },
+];
+const getStatus = (v: string) => STATUSES.find(s => s.value === v) ?? STATUSES[0];
 
-function AppleCard({ title, icon: Icon, children, className = "", action }: any) {
+// ─── Shared UI ────────────────────────────────────────────────────────────────
+function Card({ title, icon: Icon, children, action, className = "" }: any) {
   return (
-    <div className={`bg-white rounded-[32px] p-6 md:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-zinc-100/80 ${className}`}>
-      <div className="flex items-center justify-between mb-8">
+    <div className={`bg-white rounded-[28px] p-6 md:p-8 shadow-sm border border-zinc-100 ${className}`}>
+      <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-blue-50 rounded-2xl border border-blue-100/50">
-            <Icon size={20} className="text-blue-600" />
+          <div className="p-2.5 bg-blue-50 rounded-2xl border border-blue-100">
+            <Icon size={18} className="text-blue-600" />
           </div>
-          <h2 className="text-xl font-semibold tracking-tight text-zinc-900">{title}</h2>
+          <h2 className="text-lg font-semibold text-zinc-900">{title}</h2>
         </div>
-        {action && <div>{action}</div>}
+        {action}
       </div>
       {children}
     </div>
   );
 }
 
-function SettingsList({ children }: any) {
-  return <div className="bg-white rounded-2xl border border-zinc-200 overflow-hidden">{children}</div>;
-}
-
-function SettingsRow({ label, value, onChange, prefix, suffix, hint }: any) {
+function FieldRow({ label, value, onChange, prefix, suffix, hint }: any) {
   return (
-    <div className="flex items-center justify-between p-3.5 border-b border-zinc-100 last:border-0 bg-white transition-colors focus-within:bg-blue-50/50">
-      <div className="flex flex-col">
-        <span className="text-[15px] font-medium text-zinc-800">{label}</span>
-        {hint && <span className="text-[12px] text-zinc-400">{hint}</span>}
+    <div className="flex items-center justify-between px-4 py-3.5 border-b border-zinc-100 last:border-0 focus-within:bg-blue-50/40 transition-colors">
+      <div>
+        <div className="text-[14px] font-medium text-zinc-800">{label}</div>
+        {hint && <div className="text-[12px] text-zinc-400 mt-0.5">{hint}</div>}
       </div>
-      <div className="flex items-center gap-1.5 bg-zinc-50 px-3 py-1.5 rounded-lg border border-zinc-200 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-400/20 transition-all">
-        {prefix && <span className="text-zinc-400 text-[15px]">{prefix}</span>}
+      <div className="flex items-center gap-1 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+        {prefix && <span className="text-zinc-400 text-sm">{prefix}</span>}
         <input
           type="number"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-20 text-right text-[15px] font-semibold text-zinc-900 focus:outline-none bg-transparent"
-          placeholder="0"
+          onChange={e => onChange(e.target.value)}
+          className="w-20 text-right text-[14px] font-semibold text-zinc-900 bg-transparent focus:outline-none"
         />
-        {suffix && <span className="text-zinc-400 text-[15px] font-medium">{suffix}</span>}
+        {suffix && <span className="text-zinc-400 text-sm font-medium">{suffix}</span>}
       </div>
     </div>
   );
 }
 
-function JobInput({ label, value, onChange, prefix, suffix, icon: Icon, type = "number", placeholder }: any) {
+function Field({ label, value, onChange, prefix, suffix, icon: Icon, type = "number", placeholder }: any) {
   return (
-    <div className="flex flex-col gap-2">
-      <label className="text-[13px] font-medium text-zinc-500 flex items-center gap-1.5">
-        {Icon && <Icon size={14} />}
-        {label}
+    <div className="flex flex-col gap-1.5">
+      <label className="text-[12px] font-semibold text-zinc-400 uppercase tracking-wide flex items-center gap-1.5">
+        {Icon && <Icon size={12} />}{label}
       </label>
-      <div className="flex items-center gap-2 bg-white px-4 py-3 rounded-xl border border-zinc-200 focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all shadow-sm">
-        {prefix && <span className="text-zinc-400 font-medium">{prefix}</span>}
+      <div className="flex items-center gap-2 bg-white border border-zinc-200 rounded-xl px-4 py-3 focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 shadow-sm transition-all">
+        {prefix && <span className="text-zinc-400 font-medium shrink-0">{prefix}</span>}
         <input
           type={type}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full text-[17px] font-semibold text-zinc-900 focus:outline-none bg-transparent"
-          placeholder={placeholder || "0"}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder ?? "0"}
+          className="w-full text-[16px] font-semibold text-zinc-900 bg-transparent focus:outline-none"
         />
-        {suffix && <span className="text-zinc-400 font-medium">{suffix}</span>}
+        {suffix && <span className="text-zinc-400 font-medium shrink-0">{suffix}</span>}
       </div>
     </div>
   );
 }
 
-function StatBox({ label, value, subtext }: any) {
+function Stat({ label, value, sub, green }: any) {
   return (
-    <div className="flex flex-col p-4 bg-white/5 rounded-2xl border border-white/10 backdrop-blur-sm">
-      <span className="text-zinc-400 text-[13px] font-medium mb-1">{label}</span>
-      <span className="text-xl font-semibold text-white tracking-tight">{value}</span>
-      {subtext && <span className="text-zinc-500 text-[11px] mt-1">{subtext}</span>}
+    <div className={`flex flex-col p-4 rounded-2xl border ${green ? "bg-emerald-500/10 border-emerald-500/20" : "bg-white/5 border-white/10"}`}>
+      <span className="text-zinc-400 text-[12px] font-medium mb-1">{label}</span>
+      <span className={`text-xl font-bold tracking-tight ${green ? "text-emerald-400" : "text-white"}`}>{value}</span>
+      {sub && <span className="text-zinc-500 text-[11px] mt-1">{sub}</span>}
     </div>
   );
 }
 
-// --- Pages ---
+function StatusBadge({ status }: { status: string }) {
+  const s = getStatus(status);
+  return (
+    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold ${s.bg} ${s.text}`}>
+      <s.Icon size={10} />{s.label}
+    </span>
+  );
+}
 
+function Spinner() {
+  return (
+    <div className="flex items-center justify-center py-24">
+      <div className="w-9 h-9 rounded-full border-[3px] border-blue-600 border-t-transparent animate-spin" />
+    </div>
+  );
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
 function Dashboard() {
   const navigate = useNavigate();
-  const [jobs, setJobs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState("date-desc");
-  const [isDeleting, setIsDeleting] = useState<string | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [jobs, setJobs]               = useState<any[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [search, setSearch]           = useState("");
+  const [sort, setSort]               = useState("date-desc");
+  const [statusFilter, setFilter]     = useState("all");
+  const [deleting, setDeleting]       = useState<string | null>(null);
+  const [confirmDel, setConfirmDel]   = useState<string | null>(null);
+  const [duping, setDuping]           = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, "jobs"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const jobsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setJobs(jobsData);
-      setLoading(false);
-    });
-    return () => unsubscribe();
+    return onSnapshot(
+      q,
+      snap => { setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      err  => { console.error(err); setLoading(false); }
+    );
   }, []);
 
-  const handleDelete = async (id: string, e: any) => {
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirmDeleteId !== id) {
-      setConfirmDeleteId(id);
-      setTimeout(() => setConfirmDeleteId(null), 3000);
+    if (confirmDel !== id) {
+      setConfirmDel(id);
+      setTimeout(() => setConfirmDel(null), 3000);
       return;
     }
-    
-    setIsDeleting(id);
-    try {
-      await deleteDoc(doc(db, "jobs", id));
-    } catch (err) {
-      console.error("Failed to delete job", err);
-    } finally {
-      setIsDeleting(null);
-      setConfirmDeleteId(null);
-    }
+    setDeleting(id);
+    try { await deleteDoc(doc(db, "jobs", id)); }
+    catch (err) { console.error(err); }
+    finally { setDeleting(null); setConfirmDel(null); }
   };
 
-  const filteredJobs = useMemo(() => {
-    let result = [...jobs];
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(j => 
-        (j.name && j.name.toLowerCase().includes(q)) || 
-        (j.partNumber && j.partNumber.toLowerCase().includes(q))
+  const handleDupe = async (job: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDuping(job.id);
+    try {
+      const { id: _id, createdAt: _ca, ...rest } = job;
+      await addDoc(collection(db, "jobs"), {
+        ...rest,
+        name: `${rest.name || "Unnamed"} (Copy)`,
+        status: "quoted",
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) { console.error(err); }
+    finally { setDuping(null); }
+  };
+
+  const visible = useMemo(() => {
+    let r = [...jobs];
+    if (search) {
+      const q = search.toLowerCase();
+      r = r.filter(j =>
+        j.name?.toLowerCase().includes(q) ||
+        j.partNumber?.toLowerCase().includes(q) ||
+        j.customer?.toLowerCase().includes(q)
       );
     }
-    result.sort((a, b) => {
-      if (sortBy === 'date-desc') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      if (sortBy === 'date-asc') return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      if (sortBy === 'price-desc') return b.totalJobPrice - a.totalJobPrice;
-      if (sortBy === 'price-asc') return a.totalJobPrice - b.totalJobPrice;
+    if (statusFilter !== "all") r = r.filter(j => (j.status || "quoted") === statusFilter);
+    r.sort((a, b) => {
+      if (sort === "date-desc")  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      if (sort === "date-asc")   return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      if (sort === "price-desc") return (b.totalJobPrice || 0) - (a.totalJobPrice || 0);
+      if (sort === "price-asc")  return (a.totalJobPrice || 0) - (b.totalJobPrice || 0);
       return 0;
     });
-    return result;
-  }, [jobs, searchQuery, sortBy]);
+    return r;
+  }, [jobs, search, sort, statusFilter]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-8">
+      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">Jobs & Quotes</h1>
-          <p className="text-zinc-500 font-medium mt-1">Reference past work and pricing.</p>
+          <h1 className="text-3xl font-bold tracking-tight text-zinc-900">Jobs & Quotes</h1>
+          <p className="text-zinc-500 mt-1">Reference past work and pricing.</p>
         </div>
-        <Link to="/new" className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-full font-medium transition-colors shadow-sm whitespace-nowrap">
-          <Plus size={18} />
-          New Quote
+        <Link to="/new"
+          className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-full font-semibold transition-colors shadow-sm whitespace-nowrap">
+          <Plus size={18} /> New Quote
         </Link>
       </div>
 
-      {/* Search & Filter Bar */}
-      <div className="flex flex-col md:flex-row gap-4">
+      {/* Filters */}
+      <div className="flex flex-col md:flex-row gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
-          <input 
-            type="text" 
-            placeholder="Search by part number or name..." 
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="w-full bg-white border border-zinc-200 rounded-2xl pl-11 pr-4 py-3 text-[15px] font-medium text-zinc-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all shadow-sm"
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
+          <input
+            value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search part number, name, or customer..."
+            className="w-full bg-white border border-zinc-200 rounded-2xl pl-10 pr-4 py-3 text-[14px] font-medium text-zinc-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 shadow-sm transition-all"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative w-full md:w-auto">
-            <select 
-              value={sortBy} 
-              onChange={e => setSortBy(e.target.value)}
-              className="w-full md:w-auto appearance-none bg-white border border-zinc-200 rounded-2xl pl-4 pr-10 py-3 text-[15px] font-medium text-zinc-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all shadow-sm cursor-pointer"
-            >
-              <option value="date-desc">Newest First</option>
-              <option value="date-asc">Oldest First</option>
-              <option value="price-desc">Highest Price</option>
-              <option value="price-asc">Lowest Price</option>
-            </select>
-            <SlidersHorizontal className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" size={16} />
-          </div>
-        </div>
+        <select value={statusFilter} onChange={e => setFilter(e.target.value)}
+          className="bg-white border border-zinc-200 rounded-2xl px-4 py-3 text-[14px] font-medium text-zinc-900 focus:outline-none shadow-sm cursor-pointer">
+          <option value="all">All Statuses</option>
+          {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+        </select>
+        <select value={sort} onChange={e => setSort(e.target.value)}
+          className="bg-white border border-zinc-200 rounded-2xl px-4 py-3 text-[14px] font-medium text-zinc-900 focus:outline-none shadow-sm cursor-pointer">
+          <option value="date-desc">Newest First</option>
+          <option value="date-asc">Oldest First</option>
+          <option value="price-desc">Highest Price</option>
+          <option value="price-asc">Lowest Price</option>
+        </select>
       </div>
 
-      {loading ? (
-        <div className="text-zinc-500">Loading jobs...</div>
-      ) : jobs.length === 0 ? (
-        <div className="bg-white rounded-[32px] border border-zinc-200 p-12 text-center">
+      {/* List */}
+      {loading ? <Spinner /> : jobs.length === 0 ? (
+        <div className="bg-white rounded-[28px] border border-zinc-100 p-16 text-center">
           <div className="w-16 h-16 bg-zinc-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <Briefcase size={24} className="text-zinc-400" />
           </div>
           <h3 className="text-lg font-semibold text-zinc-900 mb-2">No jobs yet</h3>
           <p className="text-zinc-500 mb-6">Create your first quote to start building your database.</p>
-          <Link to="/new" className="inline-flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 text-white px-5 py-2.5 rounded-full font-medium transition-colors">
+          <Link to="/new"
+            className="inline-flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 text-white px-5 py-2.5 rounded-full font-semibold transition-colors">
             Create Quote
           </Link>
         </div>
-      ) : filteredJobs.length === 0 ? (
-        <div className="bg-white rounded-[32px] border border-zinc-200 p-12 text-center">
-          <div className="w-16 h-16 bg-zinc-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Search size={24} className="text-zinc-400" />
-          </div>
-          <h3 className="text-lg font-semibold text-zinc-900 mb-2">No results found</h3>
-          <p className="text-zinc-500 mb-6">We couldn't find any quotes matching "{searchQuery}".</p>
-          <button onClick={() => setSearchQuery("")} className="inline-flex items-center gap-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 px-5 py-2.5 rounded-full font-medium transition-colors">
-            Clear Search
+      ) : visible.length === 0 ? (
+        <div className="bg-white rounded-[28px] border border-zinc-100 p-16 text-center">
+          <p className="text-zinc-500 mb-4">No quotes match your filters.</p>
+          <button onClick={() => { setSearch(""); setFilter("all"); }}
+            className="inline-flex items-center gap-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 px-5 py-2.5 rounded-full font-semibold transition-colors">
+            Clear Filters
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredJobs.map((job) => (
-            <div 
-              key={job.id} 
-              onClick={() => navigate(`/job/${job.id}`)}
-              className="bg-white rounded-[24px] border border-zinc-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col cursor-pointer group"
-            >
-              <div className="h-48 bg-zinc-100 relative overflow-hidden shrink-0">
-                {(() => {
-                  let displayPhoto = job.photoBase64;
-                  if (job.photos) {
-                    try {
-                      const parsed = JSON.parse(job.photos);
-                      if (parsed.length > 0) displayPhoto = parsed[0];
-                    } catch(e) {}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {visible.map(job => {
+            let photo = job.photoBase64;
+            if (job.photos) { try { const p = JSON.parse(job.photos); if (p[0]) photo = p[0]; } catch {} }
+            return (
+              <div key={job.id} onClick={() => navigate(`/job/${job.id}`)}
+                className="bg-white rounded-[22px] border border-zinc-100 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col cursor-pointer">
+                {/* Photo */}
+                <div className="h-44 bg-zinc-100 relative overflow-hidden shrink-0">
+                  {photo
+                    ? <img src={photo} alt={job.name} className="w-full h-full object-cover" />
+                    : <div className="w-full h-full flex items-center justify-center">
+                        <ImageIcon size={40} className="text-zinc-300" />
+                      </div>
                   }
-                  return displayPhoto ? (
-                    <img src={displayPhoto} alt={job.name} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-zinc-300">
-                      <ImageIcon size={48} />
+                  <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-sm px-2.5 py-1 rounded-full text-[11px] font-bold text-zinc-800 shadow-sm">
+                    {job.partNumber || "No PN"}
+                  </div>
+                  <div className="absolute top-3 right-3">
+                    <StatusBadge status={job.status || "quoted"} />
+                  </div>
+                </div>
+
+                {/* Info */}
+                <div className="p-5 flex flex-col flex-1">
+                  <h3 className="font-bold text-zinc-900 text-[16px] truncate mb-0.5">{job.name || "Unnamed Job"}</h3>
+                  {job.customer && (
+                    <p className="text-[13px] text-zinc-400 mb-2 flex items-center gap-1">
+                      <User size={11} />{job.customer}
+                    </p>
+                  )}
+                  <div className="flex justify-between text-[13px] text-zinc-500 mb-4">
+                    <span>{job.quantity} pcs{job.scrapRate > 0 ? ` · ${job.scrapRate}% scrap` : ""}</span>
+                    {job.dueDate && (
+                      <span className="flex items-center gap-1">
+                        <Calendar size={11} />{new Date(job.dueDate).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="pt-3 border-t border-zinc-100 flex justify-between mb-4">
+                    <div>
+                      <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-0.5">Total</div>
+                      <div className="font-bold text-zinc-900">{fmt(job.totalJobPrice)}</div>
                     </div>
-                  );
-                })()}
-                <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-zinc-800 shadow-sm">
-                  {job.partNumber || "No PN"}
+                    <div className="text-right">
+                      <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-0.5">Per Part</div>
+                      <div className="font-bold text-emerald-600">{fmt(job.pricePerGoodPart)}</div>
+                    </div>
+                  </div>
+                  {/* Buttons */}
+                  <div className="pt-3 border-t border-zinc-100 flex gap-2">
+                    <button onClick={e => { e.stopPropagation(); navigate(`/job/${job.id}`); }}
+                      className="flex-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 py-2 rounded-xl text-[13px] font-semibold transition-colors flex items-center justify-center gap-1.5">
+                      <Wrench size={13} /> Edit
+                    </button>
+                    <button onClick={e => handleDupe(job, e)} disabled={duping === job.id}
+                      className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 py-2 rounded-xl text-[13px] font-semibold transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40">
+                      <Copy size={13} />{duping === job.id ? "..." : "Copy"}
+                    </button>
+                    <button onClick={e => handleDelete(job.id, e)} disabled={deleting === job.id}
+                      className={`flex-1 py-2 rounded-xl text-[13px] font-semibold transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40 ${confirmDel === job.id ? "bg-red-500 text-white" : "bg-red-50 text-red-600 hover:bg-red-100"}`}>
+                      <Trash2 size={13} />{confirmDel === job.id ? "Sure?" : "Del"}
+                    </button>
+                  </div>
                 </div>
               </div>
-              <div className="p-5 flex flex-col flex-1">
-                <h3 className="font-semibold text-lg text-zinc-900 mb-1 truncate">{job.name || "Unnamed Job"}</h3>
-                <div className="flex items-center justify-between text-sm text-zinc-500 mb-4">
-                  <span>{job.quantity} pcs</span>
-                  <span>{new Date(job.createdAt).toLocaleDateString()}</span>
-                </div>
-                <div className="pt-4 border-t border-zinc-100 flex items-center justify-between mb-4">
-                  <div>
-                    <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider mb-0.5">Total Price</div>
-                    <div className="font-bold text-zinc-900">{formatCurrency(job.totalJobPrice)}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider mb-0.5">Per Part</div>
-                    <div className="font-bold text-emerald-600">{formatCurrency(job.pricePerGoodPart)}</div>
-                  </div>
-                </div>
-                <div className="mt-auto pt-4 border-t border-zinc-100 flex items-center gap-2">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); navigate(`/job/${job.id}`); }}
-                    className="flex-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 py-2.5 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Wrench size={16} /> View / Edit
-                  </button>
-                  <button 
-                    onClick={(e) => handleDelete(job.id, e)}
-                    disabled={isDeleting === job.id}
-                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2 ${confirmDeleteId === job.id ? 'bg-red-500 text-white' : 'bg-red-50 text-red-600 hover:bg-red-100'} disabled:opacity-50`}
-                  >
-                    <Trash2 size={16} /> {confirmDeleteId === job.id ? 'Confirm?' : 'Delete'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
+// ─── Settings ─────────────────────────────────────────────────────────────────
 function Settings() {
-  const [settings, setSettings] = useState<any>(null);
+  const [s, setS]       = useState<any>(null);
   const [saving, setSaving] = useState(false);
+  const [msg, setMsg]   = useState("");
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      const docRef = doc(db, "settings", "global");
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setSettings(docSnap.data());
-      } else {
-        setSettings({
-          wages: 18000, rent: 3500, electric: 600, insurance: 800, equipment: 400,
-          supplies: 300, phone: 150, other: 500, hoursPerDay: 8, daysPerMonth: 22, workers: 3
-        });
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "settings", "global"));
+        setS(snap.exists() ? snap.data() : { ...DEFAULT_SETTINGS });
+      } catch {
+        setS({ ...DEFAULT_SETTINGS });
       }
-    };
-    fetchSettings();
+    })();
   }, []);
 
-  const handleSave = async () => {
+  const save = async () => {
     setSaving(true);
-    await setDoc(doc(db, "settings", "global"), settings);
-    setSaving(false);
+    try {
+      await setDoc(doc(db, "settings", "global"), s);
+      setMsg("Saved!"); setTimeout(() => setMsg(""), 2000);
+    } catch { setMsg("Save failed — check connection"); }
+    finally { setSaving(false); }
   };
 
-  if (!settings) return <div>Loading...</div>;
+  const upd = (k: string, v: string) => setS((prev: any) => ({ ...prev, [k]: v }));
 
-  const update = (key: string, val: string) => setSettings({ ...settings, [key]: val });
+  if (!s) return <Spinner />;
+
+  const overhead = ["wages","rent","electric","insurance","equipment","supplies","phone","other"]
+    .reduce((a, k) => a + n(s[k]), 0);
+  const hours  = n(s.hoursPerDay) * n(s.daysPerMonth) * n(s.workers);
+  const rate   = hours > 0 ? overhead / hours : 0;
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">Overhead Settings</h1>
-          <p className="text-zinc-500 font-medium mt-1">These values are used to calculate your true hourly cost.</p>
+          <h1 className="text-3xl font-bold tracking-tight text-zinc-900">Overhead Settings</h1>
+          <p className="text-zinc-500 mt-1">These values calculate your true hourly cost.</p>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 text-white px-6 py-2.5 rounded-full font-medium transition-colors shadow-sm"
-        >
-          {saving ? "Saving..." : "Save Settings"}
+        <button onClick={save} disabled={saving}
+          className="bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 text-white px-6 py-2.5 rounded-full font-semibold transition-colors shadow-sm">
+          {msg || (saving ? "Saving..." : "Save Settings")}
         </button>
       </div>
 
-      <AppleCard title="Monthly Overhead" icon={Building2}>
-        <SettingsList>
-          <SettingsRow label="Total Wages" value={settings.wages} onChange={(v: string) => update("wages", v)} prefix="$" />
-          <SettingsRow label="Rent / Lease" value={settings.rent} onChange={(v: string) => update("rent", v)} prefix="$" />
-          <SettingsRow label="Electricity" value={settings.electric} onChange={(v: string) => update("electric", v)} prefix="$" />
-          <SettingsRow label="Insurance" value={settings.insurance} onChange={(v: string) => update("insurance", v)} prefix="$" />
-          <SettingsRow label="Equipment" value={settings.equipment} onChange={(v: string) => update("equipment", v)} prefix="$" />
-          <SettingsRow label="Supplies" value={settings.supplies} onChange={(v: string) => update("supplies", v)} prefix="$" />
-          <SettingsRow label="Phone / Internet" value={settings.phone} onChange={(v: string) => update("phone", v)} prefix="$" />
-          <SettingsRow label="Other" value={settings.other} onChange={(v: string) => update("other", v)} prefix="$" />
-        </SettingsList>
-      </AppleCard>
+      {/* Live summary */}
+      <div className="bg-[#1d1d1f] rounded-[24px] p-6 grid grid-cols-3 gap-4 text-center text-white">
+        <div>
+          <div className="text-zinc-400 text-xs mb-1">Monthly Overhead</div>
+          <div className="text-2xl font-bold">{fmt(overhead)}</div>
+        </div>
+        <div>
+          <div className="text-zinc-400 text-xs mb-1">Monthly Hours</div>
+          <div className="text-2xl font-bold">{hours.toLocaleString()}</div>
+        </div>
+        <div>
+          <div className="text-zinc-400 text-xs mb-1">True Cost / Hr</div>
+          <div className="text-2xl font-bold text-emerald-400">{fmt(rate)}</div>
+        </div>
+      </div>
 
-      <AppleCard title="Labor Capacity" icon={Users}>
-        <SettingsList>
-          <SettingsRow label="Hours per Day" value={settings.hoursPerDay} onChange={(v: string) => update("hoursPerDay", v)} suffix="hrs" />
-          <SettingsRow label="Days per Month" value={settings.daysPerMonth} onChange={(v: string) => update("daysPerMonth", v)} suffix="days" />
-          <SettingsRow label="Number of Workers" value={settings.workers} onChange={(v: string) => update("workers", v)} suffix="ppl" />
-        </SettingsList>
-      </AppleCard>
+      <Card title="Monthly Overhead" icon={Building2}>
+        <div className="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
+          <FieldRow label="Total Wages"      hint="All employee wages combined"        value={s.wages}     onChange={(v: string) => upd("wages", v)}     prefix="$" />
+          <FieldRow label="Rent / Lease"                                                value={s.rent}      onChange={(v: string) => upd("rent", v)}      prefix="$" />
+          <FieldRow label="Electricity"                                                 value={s.electric}  onChange={(v: string) => upd("electric", v)}  prefix="$" />
+          <FieldRow label="Insurance"                                                   value={s.insurance} onChange={(v: string) => upd("insurance", v)} prefix="$" />
+          <FieldRow label="Equipment"        hint="Leases, maintenance, depreciation"  value={s.equipment} onChange={(v: string) => upd("equipment", v)} prefix="$" />
+          <FieldRow label="Supplies"                                                    value={s.supplies}  onChange={(v: string) => upd("supplies", v)}  prefix="$" />
+          <FieldRow label="Phone / Internet"                                            value={s.phone}     onChange={(v: string) => upd("phone", v)}     prefix="$" />
+          <FieldRow label="Other"                                                       value={s.other}     onChange={(v: string) => upd("other", v)}     prefix="$" />
+        </div>
+      </Card>
+
+      <Card title="Labor Capacity" icon={Users}>
+        <div className="bg-white rounded-2xl border border-zinc-200 overflow-hidden">
+          <FieldRow label="Hours per Day"     hint="Productive hours, not clock-in time" value={s.hoursPerDay}  onChange={(v: string) => upd("hoursPerDay", v)}  suffix="hrs" />
+          <FieldRow label="Days per Month"                                                value={s.daysPerMonth} onChange={(v: string) => upd("daysPerMonth", v)} suffix="days" />
+          <FieldRow label="Number of Workers" hint="Floor workers only"                  value={s.workers}      onChange={(v: string) => upd("workers", v)}      suffix="ppl" />
+        </div>
+      </Card>
     </div>
   );
 }
 
+// ─── Job Editor ───────────────────────────────────────────────────────────────
 function JobEditor() {
-  const { id } = useParams();
-  const navigate = useNavigate();
+  const { id }      = useParams();
+  const navigate    = useNavigate();
+
+  const [loading, setLoading]   = useState(true);
+  const [saving, setSaving]     = useState(false);
+  const [saveErr, setSaveErr]   = useState("");
   const [settings, setSettings] = useState<any>(null);
-  const [saving, setSaving] = useState(false);
 
-  // Job State
-  const [partNumber, setPartNumber] = useState("");
-  const [jobName, setJobName] = useState("");
-  const [quantity, setQuantity] = useState<string | number>(100);
-  const [minutesPerPart, setMinutesPerPart] = useState<string | number>(5);
-  const [materialCostPerPart, setMaterialCostPerPart] = useState<string | number>(2.50);
-  const [profitMargin, setProfitMargin] = useState<string | number>(35);
-  const [notes, setNotes] = useState("");
-  const [photos, setPhotos] = useState<string[]>([]);
+  // Form state
+  const [partNumber,     setPartNumber]     = useState("");
+  const [jobName,        setJobName]        = useState("");
+  const [customer,       setCustomer]       = useState("");
+  const [status,         setStatus]         = useState("quoted");
+  const [dueDate,        setDueDate]        = useState("");
+  const [quantity,       setQuantity]       = useState<string | number>(100);
+  const [minsPerPart,    setMinsPerPart]    = useState<string | number>(5);
+  const [setupMins,      setSetupMins]      = useState<string | number>(0);
+  const [matCost,        setMatCost]        = useState<string | number>(2.5);
+  const [scrapRate,      setScrapRate]      = useState<string | number>(0);
+  const [margin,         setMargin]         = useState<string | number>(35);
+  const [notes,          setNotes]          = useState("");
+  const [photos,         setPhotos]         = useState<string[]>([]);
 
+  // Load data once on mount
   useEffect(() => {
-    const fetchSettings = async () => {
-      const docRef = doc(db, "settings", "global");
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setSettings(docSnap.data());
-      } else {
-        setSettings({
-          wages: 18000, rent: 3500, electric: 600, insurance: 800, equipment: 400,
-          supplies: 300, phone: 150, other: 500, hoursPerDay: 8, daysPerMonth: 22, workers: 3
-        });
-      }
-    };
-    fetchSettings();
-      
-    if (id) {
-      const fetchJob = async () => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+
+      // Always load settings first (fall back to defaults if offline)
+      let cfg = { ...DEFAULT_SETTINGS };
+      try {
+        const snap = await getDoc(doc(db, "settings", "global"));
+        if (snap.exists()) cfg = snap.data() as any;
+      } catch { /* use defaults */ }
+      if (!cancelled) setSettings(cfg);
+
+      // Load existing job if editing
+      if (id) {
         try {
-          const docRef = doc(db, "jobs", id);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            setPartNumber(data.partNumber || "");
-            setJobName(data.name || "");
-            setQuantity(data.quantity || 100);
-            setMinutesPerPart(data.minutesPerPart || 5);
-            setMaterialCostPerPart(data.materialCostPerPart || 0);
-            setProfitMargin(data.profitMargin || 35);
-            setNotes(data.notes || "");
-            
-            let loadedPhotos: string[] = [];
-            if (data.photos) {
-              try { 
-                const parsed = typeof data.photos === 'string' ? JSON.parse(data.photos) : data.photos;
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                  loadedPhotos = parsed;
-                }
-              } catch(e) {}
-            }
-            if (loadedPhotos.length === 0 && data.photoBase64) {
-              loadedPhotos = [data.photoBase64];
-            }
-            setPhotos(loadedPhotos);
+          const snap = await getDoc(doc(db, "jobs", id));
+          if (snap.exists() && !cancelled) {
+            const d = snap.data();
+            setPartNumber(d.partNumber         || "");
+            setJobName(d.name                  || "");
+            setCustomer(d.customer             || "");
+            setStatus(d.status                 || "quoted");
+            setDueDate(d.dueDate               || "");
+            setQuantity(d.quantity             ?? 100);
+            setMinsPerPart(d.minutesPerPart    ?? 5);
+            setSetupMins(d.setupMinutes        ?? 0);
+            setMatCost(d.materialCostPerPart   ?? 0);
+            setScrapRate(d.scrapRate           ?? 0);
+            setMargin(d.profitMargin           ?? 35);
+            setNotes(d.notes                   || "");
+            let px: string[] = [];
+            if (d.photos) { try { px = JSON.parse(d.photos); } catch {} }
+            if (!px.length && d.photoBase64) px = [d.photoBase64];
+            if (!cancelled) setPhotos(px);
           }
-        } catch (err) {
-          console.error("Failed to load job", err);
-        }
-      };
-      fetchJob();
-    }
+        } catch (e) { console.error("Job load failed:", e); }
+      }
+
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
   }, [id]);
 
-  const handlePhotoUpload = (e: any) => {
-    const files = Array.from(e.target.files);
-    files.forEach(file => {
-      const reader = new FileReader();
-      reader.onloadend = () => setPhotos(prev => [...prev, reader.result as string]);
-      reader.readAsDataURL(file as File);
-    });
-  };
-
-  const removePhoto = (index: number) => {
-    setPhotos(prev => prev.filter((_, i) => i !== index));
-  };
-
+  // Pure pricing calculation — no motion, no layout animation
   const calc = useMemo(() => {
     if (!settings) return null;
-    
-    const totalMonthlyOverhead = p(settings.wages) + p(settings.rent) + p(settings.electric) + p(settings.insurance) + p(settings.equipment) + p(settings.supplies) + p(settings.phone) + p(settings.other);
-    const totalMonthlyHours = p(settings.hoursPerDay) * p(settings.daysPerMonth) * p(settings.workers);
-    const costPerHour = totalMonthlyHours > 0 ? totalMonthlyOverhead / totalMonthlyHours : 0;
-    const costPerMinute = costPerHour / 60;
+    const overhead =
+      n(settings.wages) + n(settings.rent)      + n(settings.electric) +
+      n(settings.insurance) + n(settings.equipment) + n(settings.supplies) +
+      n(settings.phone) + n(settings.other);
+    const totalHours = n(settings.hoursPerDay) * n(settings.daysPerMonth) * n(settings.workers);
+    const ratePerHr  = totalHours > 0 ? overhead / totalHours : 0;
+    const ratePerMin = ratePerHr / 60;
 
-    const vQuantity = p(quantity);
-    const calcQuantity = vQuantity > 0 ? vQuantity : 1;
-    const vTimePerPart = p(minutesPerPart);
-    const vMaterialCost = p(materialCostPerPart);
-    const vProfitMargin = Math.min(99, p(profitMargin));
+    const qty        = Math.max(1, n(quantity));
+    const tpp        = n(minsPerPart);
+    const setup      = n(setupMins);
+    const mat        = n(matCost);
+    const scrap      = Math.min(99, n(scrapRate));
+    const prof       = Math.min(99, n(margin));
 
-    const partsToMake = calcQuantity;
-    const totalLaborCost = (partsToMake * vTimePerPart * costPerMinute);
-    const totalMaterialCost = partsToMake * vMaterialCost;
-    const totalRawCost = totalLaborCost + totalMaterialCost;
+    const scrapMult  = scrap > 0 ? 1 / (1 - scrap / 100) : 1;
+    const toMake     = Math.ceil(qty * scrapMult);
+    const scrapCount = toMake - qty;
 
-    const rawCostPerGoodPart = totalRawCost / calcQuantity;
-    const pricePerGoodPart = rawCostPerGoodPart / (1 - vProfitMargin / 100);
+    const setupCost  = setup * ratePerMin;
+    const laborCost  = toMake * tpp * ratePerMin + setupCost;
+    const matCostTotal = toMake * mat;
+    const rawTotal   = laborCost + matCostTotal;
+    const rawPerGood = rawTotal / qty;
+    const priceEach  = rawPerGood / (1 - prof / 100);
+    const priceJob   = priceEach * qty;
+    const profit     = priceJob - rawTotal;
 
-    const totalJobPrice = vQuantity > 0 ? pricePerGoodPart * vQuantity : 0;
-    const totalJobCost = vQuantity > 0 ? totalRawCost : 0;
-    const grossProfit = totalJobPrice - totalJobCost;
+    return { ratePerHr, toMake, scrapCount, setupCost, laborCost, matCostTotal, rawTotal, rawPerGood, priceEach, priceJob, profit };
+  }, [settings, quantity, minsPerPart, setupMins, matCost, scrapRate, margin]);
 
-    return { costPerHour, partsToMake, totalLaborCost, totalMaterialCost, totalRawCost, rawCostPerGoodPart, pricePerGoodPart, totalJobPrice, totalJobCost, grossProfit };
-  }, [settings, quantity, minutesPerPart, materialCostPerPart, profitMargin]);
+  const addPhotos = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    Array.from(e.target.files || []).forEach(f => {
+      const r = new FileReader();
+      r.onloadend = () => setPhotos(p => [...p, r.result as string]);
+      r.readAsDataURL(f);
+    });
+  }, []);
 
-  const handleSave = async () => {
+  const save = async () => {
     if (!calc) return;
-    setSaving(true);
-    
+    setSaving(true); setSaveErr("");
     try {
-      // Upload any new base64 photos to Firebase Storage
-      const uploadedPhotos = await Promise.all(photos.map(async (photo) => {
-        if (photo.startsWith("data:image")) {
-          try {
-            const photoRef = ref(storage, `jobs/${Date.now()}-${Math.random().toString(36).slice(2)}`);
-            await uploadString(photoRef, photo, 'data_url');
-            return await getDownloadURL(photoRef);
-          } catch (uploadErr) {
-            console.warn("Storage upload failed, falling back to base64", uploadErr);
-            return photo; // Fallback to base64 if storage is not configured
-          }
-        }
-        return photo; // Already a URL
+      const uploaded = await Promise.all(photos.map(async ph => {
+        if (!ph.startsWith("data:image")) return ph;
+        try {
+          const r = ref(storage, `jobs/${Date.now()}-${Math.random().toString(36).slice(2)}`);
+          await uploadString(r, ph, "data_url");
+          return await getDownloadURL(r);
+        } catch { return ph; }
       }));
 
       const payload = {
-        partNumber, name: jobName, quantity: p(quantity),
-        minutesPerPart: p(minutesPerPart), materialCostPerPart: p(materialCostPerPart),
-        profitMargin: p(profitMargin), notes, 
-        photos: JSON.stringify(uploadedPhotos), 
-        photoBase64: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null,
-        totalJobPrice: calc.totalJobPrice, totalJobCost: calc.totalJobCost, pricePerGoodPart: calc.pricePerGoodPart
+        partNumber, name: jobName, customer, status, dueDate, notes,
+        quantity: n(quantity), minutesPerPart: n(minsPerPart),
+        setupMinutes: n(setupMins), materialCostPerPart: n(matCost),
+        scrapRate: n(scrapRate), profitMargin: n(margin),
+        photos: JSON.stringify(uploaded),
+        photoBase64: uploaded[0] ?? null,
+        totalJobPrice:    calc.priceJob,
+        totalJobCost:     calc.rawTotal,
+        pricePerGoodPart: calc.priceEach,
+        partsToMake:      calc.toMake,
       };
-      
+
       if (id) {
         await updateDoc(doc(db, "jobs", id), payload);
       } else {
-        await addDoc(collection(db, "jobs"), {
-          ...payload,
-          createdAt: new Date().toISOString()
-        });
+        await addDoc(collection(db, "jobs"), { ...payload, createdAt: new Date().toISOString() });
       }
       navigate("/");
     } catch (err) {
-      console.error("Failed to save job", err);
-      setSaving(false);
-    }
+      console.error(err);
+      setSaveErr("Save failed — check your connection");
+    } finally { setSaving(false); }
   };
 
-  if (!settings || !calc) return <div>Loading calculator...</div>;
+  // Show spinner while loading — NEVER show blank or flicker
+  if (loading) return <Spinner />;
 
-  const laborPct = calc.totalJobPrice > 0 ? (calc.totalLaborCost / calc.totalJobPrice) * 100 : 0;
-  const materialPct = calc.totalJobPrice > 0 ? (calc.totalMaterialCost / calc.totalJobPrice) * 100 : 0;
-  const profitPct = calc.totalJobPrice > 0 ? (calc.grossProfit / calc.totalJobPrice) * 100 : 0;
+  // Bar widths as plain percentages (CSS transition, no Framer Motion)
+  const lPct = calc && calc.priceJob > 0 ? (calc.laborCost    / calc.priceJob) * 100 : 0;
+  const mPct = calc && calc.priceJob > 0 ? (calc.matCostTotal / calc.priceJob) * 100 : 0;
+  const pPct = calc && calc.priceJob > 0 ? (calc.profit       / calc.priceJob) * 100 : 0;
 
   return (
     <div className="max-w-7xl mx-auto">
+      {/* Header */}
       <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">{id ? "Job Details" : "New Quote"}</h1>
-          <p className="text-zinc-500 font-medium mt-1">{id ? "View details, edit inputs, and adjust your profit margin live." : "Calculate and save a new job to the database."}</p>
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate("/")}
+            className="p-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-600 transition-colors">
+            <ArrowLeft size={18} />
+          </button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-zinc-900">{id ? "Edit Job" : "New Quote"}</h1>
+            <p className="text-zinc-500 mt-0.5 text-sm">
+              {id ? "Edit inputs and adjust margin live." : "Calculate and save a new job."}
+            </p>
+          </div>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-full font-medium transition-colors shadow-sm"
-        >
-          {saving ? "Saving..." : "Save Job to Database"}
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button onClick={save} disabled={saving}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-full font-semibold transition-colors shadow-sm">
+            {saving ? "Saving..." : "Save Job to Database"}
+          </button>
+          {saveErr && <span className="text-red-500 text-xs">{saveErr}</span>}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
-        <div className="lg:col-span-7 space-y-8">
-          <AppleCard title="Job Details" icon={Briefcase}>
-            {/* Photos Upload */}
-            <div className="mb-8">
-              <label className="text-[13px] font-medium text-zinc-500 mb-2 block">Part Photos</label>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {photos.map((photo, i) => (
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+        {/* ── Left column ── */}
+        <div className="lg:col-span-7 space-y-6">
+
+          {/* Job Details */}
+          <Card title="Job Details" icon={Briefcase}>
+            {/* Photos */}
+            <div className="mb-6">
+              <label className="text-[12px] font-semibold text-zinc-400 uppercase tracking-wide mb-2 block">Part Photos</label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {photos.map((ph, i) => (
                   <div key={i} className="relative aspect-square rounded-2xl overflow-hidden border border-zinc-200 group">
-                    <img src={photo} alt={`Part ${i+1}`} className="w-full h-full object-cover" />
-                    <button 
-                      onClick={() => removePhoto(i)}
-                      className="absolute top-2 right-2 bg-black/50 hover:bg-red-500 text-white p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all"
-                    >
-                      <X size={14} />
+                    <img src={ph} alt="" className="w-full h-full object-cover" />
+                    <button onClick={() => setPhotos(p => p.filter((_, j) => j !== i))}
+                      className="absolute top-1.5 right-1.5 bg-black/50 hover:bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-all">
+                      <X size={12} />
                     </button>
                   </div>
                 ))}
-                <div className="relative aspect-square bg-zinc-50 border-2 border-dashed border-zinc-200 rounded-2xl overflow-hidden hover:bg-zinc-100 transition-colors flex items-center justify-center group cursor-pointer">
-                  <input type="file" accept="image/*" multiple onChange={handlePhotoUpload} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
+                <label className="relative aspect-square bg-zinc-50 border-2 border-dashed border-zinc-200 rounded-2xl flex items-center justify-center hover:bg-zinc-100 cursor-pointer transition-colors">
+                  <input type="file" accept="image/*" multiple onChange={addPhotos} className="sr-only" />
                   <div className="text-center">
-                    <Plus size={24} className="text-zinc-300 mx-auto mb-1 group-hover:text-blue-400 transition-colors" />
-                    <span className="text-xs font-medium text-zinc-500">Add Photo</span>
+                    <Plus size={22} className="text-zinc-300 mx-auto mb-1" />
+                    <span className="text-[11px] font-medium text-zinc-400">Add Photo</span>
                   </div>
-                </div>
+                </label>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
-              <JobInput label="Part Number" type="text" value={partNumber} onChange={setPartNumber} placeholder="e.g. PN-10492" icon={Search} />
-              <JobInput label="Job / Part Name" type="text" value={jobName} onChange={setJobName} placeholder="e.g. Titanium Bracket" icon={Briefcase} />
-              <JobInput label="Quantity" value={quantity} onChange={setQuantity} suffix="pcs" icon={Package} />
-              <JobInput label="Time per Part" value={minutesPerPart} onChange={setMinutesPerPart} suffix="min" icon={Clock} />
-              <JobInput label="Material Cost / Part" value={materialCostPerPart} onChange={setMaterialCostPerPart} prefix="$" icon={DollarSign} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Part Number"     type="text" value={partNumber} onChange={setPartNumber} placeholder="e.g. PN-10492"        icon={Tag} />
+              <Field label="Job / Part Name" type="text" value={jobName}    onChange={setJobName}    placeholder="e.g. Titanium Bracket" icon={Briefcase} />
+              <Field label="Customer"        type="text" value={customer}   onChange={setCustomer}   placeholder="e.g. ACME Corp"        icon={User} />
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[12px] font-semibold text-zinc-400 uppercase tracking-wide flex items-center gap-1.5">
+                  <Tag size={12} /> Status
+                </label>
+                <select value={status} onChange={e => setStatus(e.target.value)}
+                  className="bg-white border border-zinc-200 rounded-xl px-4 py-3 text-[16px] font-semibold text-zinc-900 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 shadow-sm transition-all">
+                  {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[12px] font-semibold text-zinc-400 uppercase tracking-wide flex items-center gap-1.5">
+                  <Calendar size={12} /> Due Date
+                </label>
+                <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                  className="bg-white border border-zinc-200 rounded-xl px-4 py-3 text-[16px] font-semibold text-zinc-900 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 shadow-sm transition-all" />
+              </div>
+            </div>
+          </Card>
+
+          {/* Pricing Inputs */}
+          <Card title="Pricing Inputs" icon={DollarSign}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <Field label="Quantity (good parts needed)" value={quantity}    onChange={setQuantity}    suffix="pcs" icon={Package} />
+              <Field label="Time per Part"                value={minsPerPart} onChange={setMinsPerPart} suffix="min" icon={Clock}   placeholder="e.g. 5" />
+              <Field label="Setup / Fixture Time (once)"  value={setupMins}   onChange={setSetupMins}   suffix="min" icon={Timer}   placeholder="e.g. 30" />
+              <Field label="Material Cost per Part"       value={matCost}     onChange={setMatCost}     prefix="$"   icon={DollarSign} placeholder="e.g. 2.50" />
+              <Field label="Scrap / Rejection Rate"       value={scrapRate}   onChange={setScrapRate}   suffix="%"   icon={AlertTriangle} placeholder="e.g. 5" />
             </div>
 
-            {/* Notes */}
-            <div className="mb-2">
-              <label className="text-[13px] font-medium text-zinc-500 mb-2 block">Job Notes</label>
-              <textarea 
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                placeholder="Add any special instructions, material details, or client requests here..."
-                className="w-full bg-white border border-zinc-200 rounded-2xl px-4 py-3 text-[15px] font-medium text-zinc-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all shadow-sm min-h-[100px] resize-y"
-              />
-            </div>
-          </AppleCard>
+            {n(scrapRate) > 0 && calc && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex gap-3">
+                <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-amber-800 text-sm">
+                  To deliver <strong>{n(quantity)} good parts</strong> you must make{" "}
+                  <strong>{calc.toMake} parts</strong> ({calc.scrapCount} expected scrap).
+                  Labor &amp; material already accounts for this.
+                </p>
+              </div>
+            )}
+          </Card>
+
+          {/* Notes */}
+          <Card title="Job Notes" icon={Wrench}>
+            <textarea
+              value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Special instructions, material specs, tolerances, finish requirements, client requests..."
+              className="w-full bg-white border border-zinc-200 rounded-2xl px-4 py-3 text-[15px] text-zinc-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 shadow-sm transition-all min-h-[110px] resize-y"
+            />
+          </Card>
         </div>
 
-        {/* Results Card */}
+        {/* ── Right column — Results panel ── */}
         <div className="lg:col-span-5">
-          <div className="sticky top-8">
-            <motion.div layout className="bg-[#1d1d1f] rounded-[32px] p-8 md:p-10 text-white shadow-2xl relative overflow-hidden">
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-full max-w-lg opacity-40 pointer-events-none">
-                <div className="absolute top-[-20%] left-[-10%] w-72 h-72 bg-blue-500 rounded-full mix-blend-screen filter blur-[100px]" />
-                <div className="absolute bottom-[-20%] right-[-10%] w-72 h-72 bg-emerald-500 rounded-full mix-blend-screen filter blur-[100px]" />
-              </div>
+          <div className="sticky top-8 bg-[#1d1d1f] rounded-[28px] p-8 text-white shadow-2xl overflow-hidden">
 
+            {/* Glow blobs — purely decorative, no animation */}
+            <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-[28px]" aria-hidden>
+              <div className="absolute -top-16 -left-8 w-56 h-56 bg-blue-600 rounded-full opacity-20 blur-[70px]" />
+              <div className="absolute -bottom-16 -right-8 w-56 h-56 bg-emerald-500 rounded-full opacity-20 blur-[70px]" />
+            </div>
+
+            {calc ? (
               <div className="relative z-10">
-                <div className="mb-8">
-                  <h3 className="text-zinc-400 font-medium mb-2">Total Price to Client</h3>
-                  <div className="text-5xl md:text-6xl font-semibold tracking-tighter text-white mb-4">
-                    {formatCurrency(calc.totalJobPrice)}
+                {/* Price */}
+                <div className="mb-6">
+                  <div className="text-zinc-400 text-sm font-medium mb-1">Total Price to Client</div>
+                  <div className="text-5xl font-bold tracking-tighter leading-none mb-3">{fmt(calc.priceJob)}</div>
+                  <div className="text-zinc-400 text-xs mb-0.5">Price per Part</div>
+                  <div className="text-2xl font-semibold text-zinc-200">{fmt(calc.priceEach)}</div>
+                </div>
+
+                {/* Breakdown bar — CSS width transition, NO Framer Motion layout */}
+                <div className="mb-6">
+                  <div className="flex justify-between text-[11px] font-semibold mb-2">
+                    <span className="text-blue-400">Labor {fmt(calc.laborCost)}</span>
+                    <span className="text-purple-400">Mat. {fmt(calc.matCostTotal)}</span>
+                    <span className="text-emerald-400">Profit {fmt(calc.profit)}</span>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div>
-                      <h3 className="text-zinc-400 text-sm font-medium mb-1">Price per Part</h3>
-                      <div className="text-2xl font-medium text-zinc-200">{formatCurrency(calc.pricePerGoodPart)}</div>
-                    </div>
+                  <div className="h-3.5 w-full bg-zinc-800 rounded-full overflow-hidden flex">
+                    <div className="bg-blue-500   h-full transition-all duration-300 ease-out" style={{ width: `${lPct}%` }} />
+                    <div className="bg-purple-500 h-full transition-all duration-300 ease-out" style={{ width: `${mPct}%` }} />
+                    <div className="bg-emerald-500 h-full transition-all duration-300 ease-out" style={{ width: `${pPct}%` }} />
                   </div>
                 </div>
 
-                {/* Breakdown Bar */}
-                <div className="mb-8">
-                  <div className="flex justify-between text-[13px] font-medium mb-3">
-                    <span className="text-blue-400">Labor ({formatCurrency(calc.totalLaborCost)})</span>
-                    <span className="text-purple-400">Mat. ({formatCurrency(calc.totalMaterialCost)})</span>
-                    <span className="text-emerald-400">Profit ({formatCurrency(calc.grossProfit)})</span>
-                  </div>
-                  <div className="h-4 w-full bg-zinc-800 rounded-full overflow-hidden flex gap-0.5">
-                    <motion.div initial={false} animate={{ width: `${laborPct}%` }} className="bg-blue-500 h-full" />
-                    <motion.div initial={false} animate={{ width: `${materialPct}%` }} className="bg-purple-500 h-full" />
-                    <motion.div initial={false} animate={{ width: `${profitPct}%` }} className="bg-emerald-500 h-full" />
-                  </div>
+                {/* Stats */}
+                <div className="grid grid-cols-2 gap-3 pt-5 border-t border-zinc-800">
+                  <Stat label="True Cost / Hr"  value={fmt(calc.ratePerHr)} />
+                  <Stat label="Raw Cost / Part"  value={fmt(calc.rawPerGood)} />
+                  <Stat label="Parts to Make"
+                        value={String(calc.toMake)}
+                        sub={calc.scrapCount > 0 ? `+${calc.scrapCount} for scrap` : "No scrap"} />
+                  <Stat label="Total Cost"       value={fmt(calc.rawTotal)} />
+                  {n(setupMins) > 0 && <Stat label="Setup Cost" value={fmt(calc.setupCost)} sub="One-time" />}
+                  <Stat label="Gross Profit"     value={fmt(calc.profit)} green />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 pt-6 border-t border-zinc-800/50">
-                  <StatBox label="True Cost / Hr" value={formatCurrency(calc.costPerHour)} />
-                  <StatBox label="Raw Cost / Part" value={formatCurrency(calc.rawCostPerGoodPart)} />
-                  <StatBox label="Parts to Make" value={calc.partsToMake} />
-                  <StatBox label="Total Cost" value={formatCurrency(calc.totalJobCost)} />
-                </div>
-
-                <div className="mt-8 pt-8 border-t border-zinc-800/50">
-                  <div className="flex justify-between items-center mb-4">
-                    <label className="text-[15px] font-medium text-zinc-300 flex items-center gap-2">
-                      <PieChart size={18} className="text-emerald-400" />
-                      Adjust Profit Margin
-                    </label>
-                    <div className="bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-lg font-bold text-lg border border-emerald-500/20">
-                      {profitMargin}%
-                    </div>
+                {/* Margin slider */}
+                <div className="mt-6 pt-6 border-t border-zinc-800">
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="text-[14px] font-medium text-zinc-300 flex items-center gap-2">
+                      <PieChart size={15} className="text-emerald-400" /> Profit Margin
+                    </span>
+                    <span className="bg-emerald-500/15 text-emerald-400 px-3 py-1 rounded-lg font-bold border border-emerald-500/20">
+                      {margin}%
+                    </span>
                   </div>
-                  <input
-                    type="range" min="0" max="80" value={profitMargin} onChange={(e) => setProfitMargin(e.target.value)}
-                    className="w-full h-2.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                  />
+                  <input type="range" min="0" max="80" value={margin} onChange={e => setMargin(e.target.value)}
+                    className="w-full h-2 bg-zinc-800 rounded-full appearance-none cursor-pointer accent-emerald-500" />
+                  <div className="flex justify-between text-[10px] text-zinc-600 mt-1">
+                    <span>0%</span><span>40%</span><span>80%</span>
+                  </div>
                 </div>
               </div>
-            </motion.div>
+            ) : (
+              <div className="relative z-10 text-center py-12 text-zinc-500">
+                Enter job details to see pricing
+              </div>
+            )}
           </div>
         </div>
+
       </div>
     </div>
   );
 }
 
-// --- Layout & App ---
+// ─── Layout ───────────────────────────────────────────────────────────────────
+function Layout({ children }: { children: React.ReactNode }) {
+  const { pathname } = useLocation();
 
-function Layout({ children }: any) {
-  const location = useLocation();
-  
   const nav = [
-    { path: "/", label: "Jobs Database", icon: LayoutDashboard },
-    { path: "/new", label: "New Quote", icon: Plus },
-    { path: "/settings", label: "Overhead Settings", icon: SettingsIcon },
+    { path: "/",         label: "Jobs Database",    Icon: LayoutDashboard },
+    { path: "/new",      label: "New Quote",         Icon: Plus },
+    { path: "/settings", label: "Overhead Settings", Icon: SettingsIcon },
   ];
 
   return (
-    <div className="min-h-screen bg-[#f5f5f7] font-sans flex flex-col md:flex-row">
-      {/* Sidebar */}
-      <aside className="w-full md:w-64 bg-white border-r border-zinc-200/80 md:min-h-screen p-6 flex flex-col">
-        <div className="flex items-center gap-3 mb-10">
+    <div className="min-h-screen bg-[#f5f5f7] flex flex-col md:flex-row">
+      <aside className="w-full md:w-60 bg-white border-r border-zinc-200 md:min-h-screen p-5 flex flex-col shrink-0">
+        <div className="flex items-center gap-3 mb-8">
           <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center">
-            <Briefcase size={16} className="text-white" />
+            <Briefcase size={15} className="text-white" />
           </div>
-          <span className="font-semibold text-lg tracking-tight text-zinc-900">Job Pricer Pro</span>
+          <span className="font-bold text-[17px] text-zinc-900">Job Pricer Pro</span>
         </div>
-        
-        <nav className="flex flex-col gap-2">
-          {nav.map((item) => {
-            const active = location.pathname === item.path;
+        <nav className="flex flex-col gap-1">
+          {nav.map(({ path, label, Icon }) => {
+            const active = pathname === path || (path === "/" && pathname.startsWith("/job/"));
             return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all ${
-                  active ? "bg-blue-50 text-blue-700" : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900"
-                }`}
-              >
-                <item.icon size={18} className={active ? "text-blue-600" : "text-zinc-400"} />
-                {item.label}
+              <Link key={path} to={path}
+                className={`flex items-center gap-3 px-3.5 py-3 rounded-xl font-medium text-[14px] transition-all ${active ? "bg-blue-50 text-blue-700" : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900"}`}>
+                <Icon size={17} className={active ? "text-blue-600" : "text-zinc-400"} />
+                {label}
               </Link>
             );
           })}
         </nav>
       </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 p-6 md:p-10 overflow-y-auto">
+      <main className="flex-1 p-6 md:p-10 overflow-y-auto min-h-screen">
         {children}
       </main>
     </div>
   );
 }
 
+// ─── App ─────────────────────────────────────────────────────────────────────
 export default function App() {
   return (
     <BrowserRouter>
       <Layout>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/new" element={<JobEditor />} />
-          <Route path="/job/:id" element={<JobEditor />} />
+          <Route path="/"         element={<Dashboard />} />
+          <Route path="/new"      element={<JobEditor />} />
+          <Route path="/job/:id"  element={<JobEditor />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Layout>
