@@ -1,19 +1,32 @@
 import { initializeApp } from "firebase/app";
-import { initializeFirestore, persistentLocalCache } from "firebase/firestore";
+import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
+// IMPORTANT: keep your existing config here.
+// If you already use import.meta.env.* variables, keep that style exactly.
+// Replace the object below with YOUR current firebaseConfig if different.
 const firebaseConfig = {
-  apiKey: "AIzaSyCY9GRaiuD6hZvsKXw8v7D0lcuewPsk6J0",
-  authDomain: "sc-job-pricer.firebaseapp.com",
-  projectId: "sc-job-pricer",
-  storageBucket: "sc-job-pricer.firebasestorage.app",
-  messagingSenderId: "631603638387",
-  appId: "1:631603638387:web:270abed514dbb2de5afa06"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache(),
-  experimentalForceLongPolling: true
-});
+
+export const db = getFirestore(app);
 export const storage = getStorage(app);
+
+/**
+ * Firestore offline cache:
+ * - First load: normal
+ * - Next loads: instant from IndexedDB, then sync in background
+ */
+enableIndexedDbPersistence(db).catch(() => {
+  // Common reasons:
+  // - Multiple tabs open
+  // - Unsupported browser / private mode
+  // Safe to ignore.
+});

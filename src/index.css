@@ -1,82 +1,80 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 
+/* Tailwind v4 theme */
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+    "Apple Color Emoji", "Segoe UI Emoji";
 }
 
-/* ── Base ──────────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
 
+html, body { height: 100%; }
+
 body {
+  margin: 0;
   background-color: #f5f5f7;
   color: #1d1d1f;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Remove number spinners ────────────────────────────────────────────────── */
+/* Keep form controls from looking like ancient defaults */
+input, textarea, select, button {
+  font: inherit;
+}
+
+/* Subtle focus ring (modern) */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(59,130,246,0.15);
+}
+
+/* Disable number spinners */
 input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 input[type="number"] { -moz-appearance: textfield; }
 
-/* ── Date input ────────────────────────────────────────────────────────────── */
+/* Keep date inputs readable */
 input[type="date"] { color-scheme: light; }
 
-/* ── Range slider ──────────────────────────────────────────────────────────── */
+/* Range slider: keep your nice thumb but not overly stylized */
 input[type="range"] { -webkit-appearance: none; appearance: none; }
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.10);
+}
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 20px; height: 20px;
-  border-radius: 50%;
+  width: 18px; height: 18px; border-radius: 50%;
   background: #10b981;
   border: 3px solid #1d1d1f;
-  box-shadow: 0 0 0 2px #10b981;
+  box-shadow: 0 0 0 2px rgba(16,185,129,0.35);
   cursor: pointer;
+  margin-top: -5px;
+}
+input[type="range"]::-moz-range-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.10);
 }
 input[type="range"]::-moz-range-thumb {
-  width: 20px; height: 20px;
-  border-radius: 50%;
+  width: 18px; height: 18px; border-radius: 50%;
   background: #10b981;
   border: 3px solid #1d1d1f;
   cursor: pointer;
 }
 
-/* ── Spinner ───────────────────────────────────────────────────────────────── */
+/* Spinner */
 @keyframes spin { to { transform: rotate(360deg); } }
 .animate-spin { animation: spin 0.75s linear infinite; }
 
-/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
-
-/* ── Print (send a quote to a client) ─────────────────────────────────────── */
-@media print {
-  aside, button, input[type="range"], input[type="file"], select { display: none !important; }
-  main  { padding: 0 !important; }
-  body  { background: #fff !important; }
-  .sticky { position: static !important; }
-
-  /* Make the dark results card readable on paper */
-  .bg-\[#1d1d1f\] {
-    background: #fff !important;
-    border: 2px solid #e4e4e7 !important;
-    box-shadow: none !important;
-  }
-  .text-white,
-  .text-zinc-200,
-  .text-zinc-300 { color: #1d1d1f !important; }
-  .text-zinc-400,
-  .text-zinc-500 { color: #52525b !important; }
-  .text-emerald-400 { color: #059669 !important; }
-  .text-blue-400    { color: #2563eb !important; }
-  .text-purple-400  { color: #7c3aed !important; }
-  .border-zinc-800,
-  .border-white\/10 { border-color: #e4e4e7 !important; }
-  .bg-white\/5,
-  .bg-emerald-500\/10 { background: #f4f4f5 !important; }
-
-  @page { margin: 0.75in; }
-}
+/* Optional: subtle scrollbar (not aggressive) */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(161,161,170,0.55); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(161,161,170,0.8); }
